@@ -1,0 +1,68 @@
+﻿############################
+# Python (Backend)
+############################
+
+# Virtual environments
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Backend generated data & logs
+backend/logs/
+backend/data/*
+!backend/data/splits_70_15_15/
+!backend/data/splits_70_15_15/train.parquet
+!backend/data/splits_70_15_15/test.parquet
+!backend/data/splits_70_15_15/val.parquet
+
+############################
+# Jupyter Notebooks
+############################
+
+.ipynb_checkpoints/
+notebooks/
+
+############################
+# Frontend (Node / React / Vite)
+############################
+
+node_modules/
+dist/
+dist-ssr/
+build/
+
+# Frontend env files
+frontend/.env
+frontend/.env.local
+frontend/.env.development
+frontend/.env.production
+
+############################
+# OS / Editor
+############################
+
+.DS_Store
+Thumbs.db
+
+.vscode/*
+!.vscode/extensions.json
+
+.idea/
+*.swp
+*.swo
+
+############################
+# Logs
+############################
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
