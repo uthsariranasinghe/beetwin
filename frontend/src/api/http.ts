@@ -10,7 +10,7 @@ import type {
 } from "./types";
 
 const API_BASE = (
-  import.meta.env.VITE_API_BASE || "https://believable-flexibility-production-77c5.up.railway.app""
+  import.meta.env.VITE_API_BASE || "https://believable-flexibility-production-77c5.up.railway.app"
 ).replace(/\/$/, "");
 
 async function httpGet<T>(path: string): Promise<T> {
