@@ -1,0 +1,18 @@
+{
+  "created_at_utc": "2026-03-01T03:12:13.266120+00:00",
+  "seed": 42,
+  "split_type": "per_hive_time_order_timestamp_based",
+  "split_ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  },
+  "min_samples_per_hive_unique_timestamps": 50,
+  "n_hives_total_in_input": 52,
+  "n_hives_kept": 52,
+  "n_hives_skipped": 0,
+  "rows_total_kept": 801080,
+  "rows_train": 560733,
+  "rows_val": 120160,
+  "rows_test": 120187
+}
