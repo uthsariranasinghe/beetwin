@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-BASE_API = os.getenv("https://believable-flexibility-production-77c5.up.railway.app/")
+BASE_API = os.getenv("https://believable-flexibility-production-77c5.up.railway.app")
 API_BATCH = "http://127.0.0.1:8000/api/measurements/batch"
 API_REGISTER = "http://127.0.0.1:8000/api/hives/register"
 
