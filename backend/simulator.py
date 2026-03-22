@@ -10,11 +10,13 @@ import numpy as np
 import pandas as pd
 import requests
 
-BASE_API = os.getenv("https://believable-flexibility-production-77c5.up.railway.app")
-API_BATCH = "http://127.0.0.1:8000/api/measurements/batch"
-API_REGISTER = "http://127.0.0.1:8000/api/hives/register"
+BASE_API = os.getenv("https://believable-flexibility-production-77c5.up.railway.app/")
 
-SPLIT_DIR = Path("data/splits_70_15_15")
+API_BATCH = f"{BASE_API}/api/measurements/batch"
+API_REGISTER = f"{BASE_API}/api/hives/register"
+
+BASE_DIR = Path(__file__).resolve().parent
+SPLIT_DIR = BASE_DIR / "data" / "splits_70_15_15"
 DEFAULT_STREAM_PATH = SPLIT_DIR / "test.parquet"
 
 OBS_COLS = ["temperature", "humidity", "audio_density"]
