@@ -14,7 +14,7 @@ BASE_API = os.getenv("https://believable-flexibility-production-77c5.up.railway.
 API_BATCH = "http://127.0.0.1:8000/api/measurements/batch"
 API_REGISTER = "http://127.0.0.1:8000/api/hives/register"
 
-SPLIT_DIR = Path("../backend/data/splits_70_15_15")
+SPLIT_DIR = Path("data/splits_70_15_15")
 DEFAULT_STREAM_PATH = SPLIT_DIR / "test.parquet"
 
 OBS_COLS = ["temperature", "humidity", "audio_density"]
