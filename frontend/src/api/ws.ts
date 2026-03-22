@@ -6,7 +6,7 @@ import type { LiveMessage } from "./types";
    ========================================================= */
 
 const WS_BASE =
-  import.meta.env.VITE_WS_BASE || "ws://127.0.0.1:8000";
+  import.meta.env.VITE_WS_BASE || "wss://believable-flexibility-production-77c5.up.railway.app";
 
 /* =========================================================
    Connect to live hive stream
