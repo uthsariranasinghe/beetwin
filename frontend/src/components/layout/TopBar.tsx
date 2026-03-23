@@ -8,7 +8,7 @@ export type QuickRangeValue =
   | "last30d"
   | "custom";
 
-export type TopBarTab = "overview" | "alerts" | "history";
+export type TopBarTab = "overview" | "live" | "alerts" | "history";
 export type TopBarMode = "replay" | "live";
 
 type Props = {
@@ -74,14 +74,12 @@ function rangeLabel(value: QuickRangeValue) {
   }
 }
 
-function modeLabel(mode: TopBarMode) {
-  return mode === "live" ? "Live Mode" : "Replay Mode";
-}
-
 function getPageTitle(tab: TopBarTab) {
   switch (tab) {
     case "overview":
       return "Overview";
+    case "live":
+      return "Live Monitoring";
     case "alerts":
       return "Alerts";
     case "history":
@@ -91,8 +89,12 @@ function getPageTitle(tab: TopBarTab) {
   }
 }
 
-function getTopbarSubtitle(selectedHive: number | null) {
-  return selectedHive == null ? "No hive selected" : `Hive ${selectedHive}`;
+function getTopbarSubtitle(
+  selectedHive: number | null
+) {
+  return selectedHive == null
+    ? "No hive selected"
+    : `Hive ${selectedHive}`;
 }
 
 export default function TopBar({
@@ -116,10 +118,9 @@ export default function TopBar({
     return () => window.clearInterval(timer);
   }, []);
 
-  const subtitle = useMemo(() => {
-    return getTopbarSubtitle(selectedHive);
-  }, [selectedHive, quickRange, mode]);
-
+const subtitle = useMemo(() => {
+  return getTopbarSubtitle(selectedHive);
+}, [selectedHive]);
   return (
     <div className="topbar-inner">
       <div className="topbar-left">
