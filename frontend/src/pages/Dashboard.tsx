@@ -1,5 +1,5 @@
 import logo from "../assets/logo.png";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getAlerts,
   getHives,
@@ -7,12 +7,10 @@ import {
   getRangeHistory,
   getSnapshot,
 } from "../api/http";
-import { connectHiveLive } from "../api/ws";
 import type {
   AlertRecord,
   HiveOverviewItem,
   HiveStatus,
-  LiveMessage,
   TwinPoint,
 } from "../api/types";
 import AlertsList from "../components/dashboard/AlertsList";
@@ -24,7 +22,7 @@ import TopBar, {
   type TopBarTab,
 } from "../components/layout/TopBar";
 
-type DashboardTab = TopBarTab;
+type DashboardTab = Exclude<TopBarTab, "live">;
 type MetricKey = "temperature" | "humidity" | "audio_density";
 
 type RangeBounds = {
@@ -45,18 +43,19 @@ function parseDateInput(value: string): Date | null {
 
 function getQuickRangeBounds(
   value: QuickRangeValue,
-  now = new Date()
+  anchor: Date
 ): RangeBounds | null {
-  const to = new Date(now);
-  let from = new Date(now);
+  const to = new Date(anchor);
+  let from = new Date(anchor);
 
   switch (value) {
-    case "today":
-      from = new Date(now);
+    case "today": {
+      from = new Date(anchor);
       from.setHours(0, 0, 0, 0);
       return { from, to };
+    }
     case "yesterday": {
-      const yesterday = new Date(now);
+      const yesterday = new Date(anchor);
       yesterday.setDate(yesterday.getDate() - 1);
       yesterday.setHours(0, 0, 0, 0);
 
@@ -66,13 +65,13 @@ function getQuickRangeBounds(
       return { from: yesterday, to: yesterdayEnd };
     }
     case "last24h":
-      from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      from = new Date(anchor.getTime() - 24 * 60 * 60 * 1000);
       return { from, to };
     case "last7d":
-      from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      from = new Date(anchor.getTime() - 7 * 24 * 60 * 60 * 1000);
       return { from, to };
     case "last30d":
-      from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      from = new Date(anchor.getTime() - 30 * 24 * 60 * 60 * 1000);
       return { from, to };
     default:
       return null;
@@ -86,16 +85,6 @@ function sortAndDedupePoints(points: TwinPoint[]) {
   return Array.from(map.values()).sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
-}
-
-function isPointWithinRange(
-  point: TwinPoint,
-  from: Date | null,
-  to: Date | null
-) {
-  if (!from || !to) return false;
-  const pointTime = new Date(point.ts).getTime();
-  return pointTime >= from.getTime() && pointTime <= to.getTime();
 }
 
 function formatValue(value: number | null | undefined, digits = 2) {
@@ -195,14 +184,14 @@ function getSimpleStatusSummary(status: HiveStatus | null) {
     case "critical":
       return "Hive needs immediate attention.";
     case "offline":
-      return "No recent live data is arriving.";
+      return "No recent data is available.";
     default:
       return "Condition unavailable.";
   }
 }
 
 function getSimpleActionText(status: HiveStatus | null, alertsCount: number) {
-  if (!status) return "Check hive and sensor availability.";
+  if (!status) return "Check hive data availability.";
 
   if (status.status === "healthy") {
     return alertsCount > 0
@@ -219,7 +208,7 @@ function getSimpleActionText(status: HiveStatus | null, alertsCount: number) {
   }
 
   if (status.status === "offline") {
-    return "Check sensor power and connection.";
+    return "Review dataset availability.";
   }
 
   return "Review hive condition.";
@@ -241,7 +230,6 @@ function getAlertSummaryText(alert: AlertRecord | null) {
   return "A hive condition needs review.";
 }
 
-
 function DashboardSidebar({
   activeTab,
   onChangeTab,
@@ -251,7 +239,6 @@ function DashboardSidebar({
 }) {
   const items: { id: DashboardTab; title: string }[] = [
     { id: "overview", title: "Overview" },
-    { id: "live", title: "Live Monitoring" },
     { id: "alerts", title: "Alerts" },
     { id: "history", title: "History" },
   ];
@@ -259,12 +246,12 @@ function DashboardSidebar({
   return (
     <div className="sidebar">
       <div className="sidebar-brand">
-  <img src={logo} alt="BeeTwin Logo" className="sidebar-logo-img" />
+        <img src={logo} alt="BeeTwin Logo" className="sidebar-logo-img" />
 
-  <div className="sidebar-text">
-    <div className="sidebar-subtitle">Digital Twin Beehive Dashboard</div>
-  </div>
-</div>
+        <div className="sidebar-text">
+          <div className="sidebar-subtitle">Digital Twin Beehive Dashboard</div>
+        </div>
+      </div>
 
       <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
         {items.map((item) => {
@@ -297,39 +284,37 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<HiveOverviewItem[]>([]);
   const [selectedHive, setSelectedHive] = useState<number | null>(null);
 
-  const [liveStatus, setLiveStatus] = useState<HiveStatus | null>(null);
-  const [livePoint, setLivePoint] = useState<TwinPoint | null>(null);
-  const [liveAlerts, setLiveAlerts] = useState<AlertRecord[]>([]);
+  const [snapshotStatus, setSnapshotStatus] = useState<HiveStatus | null>(null);
+  const [snapshotPoint, setSnapshotPoint] = useState<TwinPoint | null>(null);
 
   const [rangeHistory, setRangeHistory] = useState<TwinPoint[]>([]);
   const [rangeAlertsAll, setRangeAlertsAll] = useState<AlertRecord[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [rangeLoading, setRangeLoading] = useState(false);
-  const [connectionLabel, setConnectionLabel] = useState("Disconnected");
   const [error, setError] = useState<string | null>(null);
 
   const [activeOnlyAlerts, setActiveOnlyAlerts] = useState(true);
-  const [quickRange, setQuickRange] = useState<QuickRangeValue>("today");
+  const [quickRange, setQuickRange] = useState<QuickRangeValue>("last7d");
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [focusMetric, setFocusMetric] = useState<MetricKey>("temperature");
 
-  const initialFrom = toDateInputValue(
-    new Date(new Date().setHours(0, 0, 0, 0))
-  );
-  const initialTo = toDateInputValue(new Date());
-
-  const [draftFromInput, setDraftFromInput] = useState(initialFrom);
-  const [draftToInput, setDraftToInput] = useState(initialTo);
-  const [appliedFromInput, setAppliedFromInput] = useState(initialFrom);
-  const [appliedToInput, setAppliedToInput] = useState(initialTo);
-
-  const wsRef = useRef<WebSocket | null>(null);
+  const [draftFromInput, setDraftFromInput] = useState("");
+  const [draftToInput, setDraftToInput] = useState("");
+  const [appliedFromInput, setAppliedFromInput] = useState("");
+  const [appliedToInput, setAppliedToInput] = useState("");
 
   const selectedOverview = useMemo(
     () => overview.find((item) => item.hive_id === selectedHive) ?? null,
     [overview, selectedHive]
   );
+
+  const selectedHiveLatestTs = useMemo(() => {
+    const ts = selectedOverview?.latest_point?.ts ?? null;
+    if (!ts) return null;
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }, [selectedOverview]);
 
   const appliedFrom = useMemo(() => parseDateInput(appliedFromInput), [appliedFromInput]);
   const appliedTo = useMemo(() => parseDateInput(appliedToInput), [appliedToInput]);
@@ -340,12 +325,13 @@ export default function Dashboard() {
   );
 
   const latestEstimatedPoint = useMemo(
-    () => getLatestEstimatedPoint(rangeHistory) ?? livePoint,
-    [rangeHistory, livePoint]
+    () => getLatestEstimatedPoint(rangeHistory) ?? snapshotPoint,
+    [rangeHistory, snapshotPoint]
   );
 
-  const currentLiveStatus = liveStatus ?? selectedOverview?.status ?? null;
-  const currentLiveStatusText = formatStatusLabel(currentLiveStatus?.status);
+  const currentStatus = snapshotStatus ?? selectedOverview?.status ?? null;
+  const currentStatusText = formatStatusLabel(currentStatus?.status);
+  const connectionLabel = "Replay Mode";
 
   const rangeAlerts = useMemo(() => {
     if (!appliedFrom || !appliedTo) return [];
@@ -389,8 +375,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (quickRange === "custom") return;
+    if (!selectedHiveLatestTs) return;
 
-    const bounds = getQuickRangeBounds(quickRange);
+    const bounds = getQuickRangeBounds(quickRange, selectedHiveLatestTs);
     if (!bounds) return;
 
     const fromValue = toDateInputValue(bounds.from);
@@ -400,11 +387,12 @@ export default function Dashboard() {
     setDraftToInput(toValue);
     setAppliedFromInput(fromValue);
     setAppliedToInput(toValue);
-  }, [quickRange]);
+  }, [quickRange, selectedHiveLatestTs]);
 
   useEffect(() => {
     if (selectedHive == null) return;
     if (!appliedFrom || !appliedTo) return;
+
     if (appliedFrom.getTime() > appliedTo.getTime()) {
       setError("Start time must be earlier than end time.");
       return;
@@ -428,9 +416,8 @@ export default function Dashboard() {
 
         if (cancelled) return;
 
-        setLivePoint(snapshotRes.point);
-        setLiveStatus(snapshotRes.status);
-        setLiveAlerts(alertsRes.alerts);
+        setSnapshotPoint(snapshotRes.point);
+        setSnapshotStatus(snapshotRes.status);
         setRangeAlertsAll(alertsRes.alerts);
         setRangeHistory(sortAndDedupePoints(historyRes.points));
 
@@ -455,102 +442,11 @@ export default function Dashboard() {
     }
 
     loadHiveData();
+
     return () => {
       cancelled = true;
     };
   }, [selectedHive, activeOnlyAlerts, appliedFrom, appliedTo]);
-
-  useEffect(() => {
-    if (selectedHive == null) return;
-
-    const hiveId = selectedHive;
-
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-
-    setConnectionLabel("Connecting...");
-
-    const ws = connectHiveLive(
-      hiveId,
-      (msg: LiveMessage) => {
-        if (msg.type === "snapshot") {
-          setLivePoint(msg.point);
-          setLiveStatus(msg.status);
-          setLiveAlerts(msg.alerts);
-          setConnectionLabel("Live");
-
-          setOverview((prev) =>
-            prev.map((item) =>
-              item.hive_id === msg.hive_id
-                ? { ...item, status: msg.status, latest_point: msg.point ?? item.latest_point }
-                : item
-            )
-          );
-
-          if (msg.point && isPointWithinRange(msg.point, appliedFrom, appliedTo)) {
-  const point = msg.point;
-  setRangeHistory((prev) => sortAndDedupePoints([...prev, point]));
-}
-          return;
-        }
-
-        if (msg.type === "point") {
-          setLivePoint(msg.point);
-
-          setOverview((prev) =>
-            prev.map((item) =>
-              item.hive_id === msg.hive_id
-                ? { ...item, latest_point: msg.point }
-                : item
-            )
-          );
-
-          if (isPointWithinRange(msg.point, appliedFrom, appliedTo)) {
-            setRangeHistory((prev) => sortAndDedupePoints([...prev, msg.point]));
-          }
-          return;
-        }
-
-        if (msg.type === "status") {
-          setLiveStatus(msg.status);
-          setOverview((prev) =>
-            prev.map((item) =>
-              item.hive_id === msg.hive_id ? { ...item, status: msg.status } : item
-            )
-          );
-          return;
-        }
-
-        if (msg.type === "alerts") {
-          setLiveAlerts(msg.alerts);
-          setRangeAlertsAll((prev) =>
-            [...msg.alerts, ...prev].sort(
-              (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()
-            )
-          );
-          return;
-        }
-
-        if (msg.type === "heartbeat") {
-          setConnectionLabel("Live");
-          return;
-        }
-
-        if (msg.type === "error") {
-          setConnectionLabel("Error");
-          setError(msg.detail);
-        }
-      },
-      () => setConnectionLabel("Live"),
-      () => setConnectionLabel("Disconnected"),
-      () => setConnectionLabel("Error")
-    );
-
-    wsRef.current = ws;
-    return () => ws.close();
-  }, [selectedHive, appliedFrom, appliedTo]);
 
   async function refreshOverview() {
     try {
@@ -584,9 +480,7 @@ export default function Dashboard() {
   function renderOverviewTab() {
     return (
       <>
-        <KpiCards status={currentLiveStatus} point={latestEstimatedPoint} />
-
-        
+        <KpiCards status={currentStatus} point={latestEstimatedPoint} />
 
         <div className="dashboard-grid">
           <div className="charts-column">
@@ -594,7 +488,7 @@ export default function Dashboard() {
               <div className="section-header section-header-space">
                 <div>
                   <h3>Hive Overview</h3>
-                  <div className="muted">Live condition and trend</div>
+                  <div className="muted">Historical replay condition and trend</div>
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -627,19 +521,19 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <strong>Status</strong>
-                  <div>{currentLiveStatusText}</div>
+                  <div>{currentStatusText}</div>
                 </div>
                 <div>
-                  <strong>Connection</strong>
+                  <strong>Mode</strong>
                   <div>{connectionLabel}</div>
                 </div>
                 <div>
                   <strong>Summary</strong>
-                  <div>{getSimpleStatusSummary(currentLiveStatus)}</div>
+                  <div>{getSimpleStatusSummary(currentStatus)}</div>
                 </div>
                 <div>
                   <strong>Action</strong>
-                  <div>{getSimpleActionText(currentLiveStatus, rangeAlerts.length)}</div>
+                  <div>{getSimpleActionText(currentStatus, rangeAlerts.length)}</div>
                 </div>
                 <div>
                   <strong>Latest Alert</strong>
@@ -652,34 +546,6 @@ export default function Dashboard() {
           </div>
         </div>
       </>
-    );
-  }
-
-  function renderLiveTab() {
-    return (
-      <div className="chart-stack">
-        <TwinChart
-          title="Temperature"
-          metric="temperature"
-          points={rangeHistory}
-          mode="technical"
-          quickRange={quickRange}
-        />
-        <TwinChart
-          title="Humidity"
-          metric="humidity"
-          points={rangeHistory}
-          mode="technical"
-          quickRange={quickRange}
-        />
-        <TwinChart
-          title="Hive Activity"
-          metric="audio_density"
-          points={rangeHistory}
-          mode="technical"
-          quickRange={quickRange}
-        />
-      </div>
     );
   }
 
@@ -716,19 +582,15 @@ export default function Dashboard() {
             <div className="details-grid">
               <div>
                 <strong>Current Status</strong>
-                <div>{currentLiveStatusText}</div>
+                <div>{currentStatusText}</div>
               </div>
               <div>
                 <strong>Total Alerts</strong>
                 <div>{rangeAlerts.length}</div>
               </div>
               <div>
-                <strong>Live Alerts</strong>
-                <div>{liveAlerts.length}</div>
-              </div>
-              <div>
                 <strong>Action</strong>
-                <div>{getSimpleActionText(currentLiveStatus, rangeAlerts.length)}</div>
+                <div>{getSimpleActionText(currentStatus, rangeAlerts.length)}</div>
               </div>
             </div>
           </div>
@@ -810,9 +672,27 @@ export default function Dashboard() {
           </div>
 
           <div className="chart-stack">
-            <TwinChart title="Temperature History" metric="temperature" points={rangeHistory} mode="technical" quickRange={quickRange} />
-            <TwinChart title="Humidity History" metric="humidity" points={rangeHistory} mode="technical" quickRange={quickRange} />
-            <TwinChart title="Activity History" metric="audio_density" points={rangeHistory} mode="technical" quickRange={quickRange} />
+            <TwinChart
+              title="Temperature History"
+              metric="temperature"
+              points={rangeHistory}
+              mode="technical"
+              quickRange={quickRange}
+            />
+            <TwinChart
+              title="Humidity History"
+              metric="humidity"
+              points={rangeHistory}
+              mode="technical"
+              quickRange={quickRange}
+            />
+            <TwinChart
+              title="Activity History"
+              metric="audio_density"
+              points={rangeHistory}
+              mode="technical"
+              quickRange={quickRange}
+            />
           </div>
         </div>
       </div>
@@ -823,8 +703,6 @@ export default function Dashboard() {
     switch (activeTab) {
       case "overview":
         return renderOverviewTab();
-      case "live":
-        return renderLiveTab();
       case "alerts":
         return renderAlertsTab();
       case "history":
@@ -839,14 +717,14 @@ export default function Dashboard() {
       sidebar={<DashboardSidebar activeTab={activeTab} onChangeTab={setActiveTab} />}
       topbar={
         <TopBar
-  hives={hives}
-  selectedHive={selectedHive}
-  onSelectHive={setSelectedHive}
-  connectionLabel={connectionLabel}
-  quickRange={quickRange}
-  onChangeQuickRange={setQuickRange}
-  activeTab={activeTab}
-/>
+          hives={hives}
+          selectedHive={selectedHive}
+          onSelectHive={setSelectedHive}
+          connectionLabel={connectionLabel}
+          quickRange={quickRange}
+          onChangeQuickRange={setQuickRange}
+          activeTab={activeTab as TopBarTab}
+        />
       }
     >
       {loading ? (
