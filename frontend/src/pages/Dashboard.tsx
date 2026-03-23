@@ -259,7 +259,7 @@ function DashboardSidebar({
 }
 
 export default function Dashboard() {
-  const [mode, setMode] = useState<DashboardMode>("replay");
+  const mode: DashboardMode = "replay";
   const [hives, setHives] = useState<number[]>([]);
   const [overview, setOverview] = useState<HiveOverviewItem[]>([]);
   const [selectedHive, setSelectedHive] = useState<number | null>(null);
@@ -848,16 +848,14 @@ useEffect(() => {
       sidebar={<DashboardSidebar activeTab={activeTab} onChangeTab={setActiveTab} />}
       topbar={
         <TopBar
-          hives={hives}
-          selectedHive={selectedHive}
-          onSelectHive={setSelectedHive}
-          connectionLabel={connectionLabel}
-          quickRange={quickRange}
-          onChangeQuickRange={setQuickRange}
-          activeTab={activeTab}
-          mode={mode}
-          onChangeMode={setMode}
-        />
+  hives={hives}
+  selectedHive={selectedHive}
+  onSelectHive={setSelectedHive}
+  connectionLabel={connectionLabel}
+  quickRange={quickRange}
+  onChangeQuickRange={setQuickRange}
+  activeTab={activeTab}
+/>
       }
     >
       {loading ? (
