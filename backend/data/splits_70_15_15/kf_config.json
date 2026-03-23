@@ -1,0 +1,31 @@
+{
+  "Q_best_diag": [0.0373647, 0.89255475, 8.46501897],
+  "R0_diag": [0.0124549, 0.29751825, 2.82167299],
+  "P0_diag": [10.0, 10.0, 10.0],
+
+  "nis_norm_p95": 1.961865,
+  "nis_norm_p99": 5.370758,
+
+  "params": {
+    "D": 3,
+
+    "OBS_COLS": ["temperature", "humidity", "audio_density"],
+
+    "USE_DT_AWARE_Q": true,
+    "BASE_DT_MIN": 15.0,
+
+    "ADAPT_R": true,
+    "ALPHA_R": 0.99,
+    "R_MIN_MULT": 0.2,
+    "R_MAX_MULT": 5.0,
+    "GATE_NIS_NORM": 6.0,
+
+    "S_JITTER": 1e-6,
+
+    "MISSING_Q_MULT": 1.2,
+    "MISSING_STREAK_MAX_MULT": 2.0,
+
+    "P_DIAG_MIN": 1e-9,
+    "P_DIAG_MAX": 1e6
+  }
+}
