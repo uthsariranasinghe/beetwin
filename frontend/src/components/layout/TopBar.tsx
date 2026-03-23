@@ -9,6 +9,7 @@ export type QuickRangeValue =
   | "custom";
 
 export type TopBarTab = "overview" | "live" | "alerts" | "history";
+export type TopBarMode = "replay" | "live";
 
 type Props = {
   hives: number[];
@@ -18,12 +19,18 @@ type Props = {
   quickRange: QuickRangeValue;
   onChangeQuickRange: (value: QuickRangeValue) => void;
   activeTab: TopBarTab;
+  mode: TopBarMode;
+  onChangeMode: (mode: TopBarMode) => void;
 };
 
 function connectionText(label: string) {
   switch (label) {
     case "Live":
       return "Live";
+    case "Live Mode":
+      return "Live Mode";
+    case "Replay Mode":
+      return "Replay Mode";
     case "Connecting...":
       return "Connecting";
     case "Disconnected":
@@ -83,12 +90,11 @@ function getPageTitle(tab: TopBarTab) {
 }
 
 function getTopbarSubtitle(
-  selectedHive: number | null,
-  quickRange: QuickRangeValue
+  selectedHive: number | null
 ) {
-  const hiveText = selectedHive == null ? "No hive selected" : `Hive ${selectedHive}`;
-  const rangeText = rangeLabel(quickRange);
-  return `${hiveText} • ${rangeText}`;
+  return selectedHive == null
+    ? "No hive selected"
+    : `Hive ${selectedHive}`;
 }
 
 export default function TopBar({
@@ -99,6 +105,8 @@ export default function TopBar({
   quickRange,
   onChangeQuickRange,
   activeTab,
+  mode,
+  onChangeMode,
 }: Props) {
   const [now, setNow] = useState(new Date());
 
@@ -110,10 +118,9 @@ export default function TopBar({
     return () => window.clearInterval(timer);
   }, []);
 
-  const subtitle = useMemo(() => {
-    return getTopbarSubtitle(selectedHive, quickRange);
-  }, [selectedHive, quickRange]);
-
+const subtitle = useMemo(() => {
+  return getTopbarSubtitle(selectedHive);
+}, [selectedHive]);
   return (
     <div className="topbar-inner">
       <div className="topbar-left">
@@ -124,6 +131,17 @@ export default function TopBar({
       </div>
 
       <div className="topbar-right">
+        <div className="topbar-control-card">
+          <span className="topbar-select-label">Mode</span>
+          <select
+            value={mode}
+            onChange={(e) => onChangeMode(e.target.value as TopBarMode)}
+          >
+            <option value="replay">Replay Mode</option>
+            <option value="live">Live Mode</option>
+          </select>
+        </div>
+
         <div className="topbar-control-card">
           <span className="topbar-select-label">Hive</span>
           <select
