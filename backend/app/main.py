@@ -511,7 +511,7 @@ def resolve_alert(alert_id: int):
     finally:
         conn.close()
 
-##from fastapi.staticfiles import StaticFiles
+from fastapi.staticfiles import StaticFiles
 
 from pathlib import Path
 
