@@ -9,9 +9,7 @@ import type {
   HiveStatus,
 } from "./types";
 
-const API_BASE = (
-  import.meta.env.VITE_API_BASE || "https://believable-flexibility-production-77c5.up.railway.app"
-).replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 
 async function httpGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
