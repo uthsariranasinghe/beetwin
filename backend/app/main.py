@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import (
     PRELOAD_BATCH_SIZE,
@@ -19,8 +21,6 @@ from .schemas import (
     HiveRegisterIn,
     HistoryResponse,
     LatestResponse,
-    MeasurementBatchIn,
-    MeasurementIn,
 )
 from .services.history import (
     derive_status_from_latest,
@@ -32,49 +32,34 @@ from .services.history import (
     list_hives,
     list_latest_points,
 )
-from .services.ingest import HiveStateRegistry, ingest_measurement, ingest_measurements_batch
+from .services.ingest import HiveStateRegistry
 from .services.preload import preload_history_if_needed
-from .ws import WSManager
 
 
 app = FastAPI(
     title="Beehive Digital Twin API",
-    version="2.2",
+    version="2.2-replay",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # simplest and safest for now
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Shared websocket manager for live dashboard updates
-ws_mgr = WSManager()
-
-# Global runtime registry that stores Kalman filter state for each hive
+# Keep this only because preload may still depend on the registry.
+# It is not used for live mode here.
 registry: HiveStateRegistry | None = None
 
 
-# Hives selected for dashboard preload and simulator demo
+# Hives selected for dashboard preload
 SELECTED_DASHBOARD_HIVES = [
     202039, 202040, 202043, 202045, 202046,
     202048, 202049, 202051, 202052, 202053,
     202054, 202055, 202056, 202060, 202061,
 ]
-
-
-def get_registry() -> HiveStateRegistry:
-    """
-    Return the in-memory hive state registry.
-
-    The registry is created during application startup.
-    If startup has not finished yet, the API should not ingest new data.
-    """
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
-    return registry
 
 
 def to_utc_iso(ts: datetime) -> str:
@@ -121,7 +106,7 @@ def build_status_payload(hive_id: int) -> dict:
 
 def build_snapshot_payload(hive_id: int) -> dict:
     """
-    Build the full snapshot used when a websocket client first connects.
+    Build the full snapshot for one hive.
 
     A snapshot contains:
     - latest point
@@ -140,30 +125,16 @@ def build_snapshot_payload(hive_id: int) -> dict:
     }
 
 
-async def broadcast_hive_updates(hive_id: int, point_payload: dict) -> None:
-    """
-    Broadcast the latest point, current status, and active alerts for one hive.
-
-    This keeps the live dashboard in sync after each ingestion event.
-    """
-    await ws_mgr.broadcast_point(hive_id, point_payload)
-
-    status = build_status_payload(hive_id)
-    await ws_mgr.broadcast_status(hive_id, status)
-
-    alerts = get_alerts(hive_id, active_only=True, limit=50)
-    await ws_mgr.broadcast_alerts(hive_id, alerts)
-
-
 @app.on_event("startup")
 async def startup_event() -> None:
     """
-    Initialize the database, filter registry, optional preload, and websocket heartbeat.
+    Initialize the database and preload replay history on startup.
     """
     global registry
 
     init_db()
 
+    # Kept only if preload_history_if_needed still expects a registry.
     kf_config = load_kf_config()
     registry = HiveStateRegistry(kf_config)
 
@@ -177,27 +148,11 @@ async def startup_event() -> None:
             end_buffer_minutes=PRELOAD_END_BUFFER_MINUTES,
         )
 
-    await ws_mgr.start_heartbeat_loop(interval_seconds=20.0)
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """
-    Stop background websocket tasks during application shutdown.
-    """
-    await ws_mgr.stop_heartbeat_loop()
-
-
-##@app.get("/")
-##def root():
-   ## """Basic root endpoint to confirm the API is running."""
-   ## return {"message": "Beehive Digital Twin API running"}
-
 
 @app.get("/api/health")
 def health():
     """Simple health-check endpoint."""
-    return {"ok": True, "service": "beehive-digital-twin"}
+    return {"ok": True, "service": "beehive-digital-twin", "mode": "replay"}
 
 
 @app.get("/api/hives", response_model=HiveListResponse)
@@ -210,8 +165,6 @@ def hives():
 def hives_overview():
     """
     Return an overview of all hives with current status and latest point.
-
-    This is useful for summary cards or dashboard tables.
     """
     latest_points = {int(p["hive_id"]): p for p in list_latest_points()}
     hive_ids = list_hives()
@@ -340,7 +293,6 @@ def hive_alerts(
 
     Optional ts_from and ts_to allow filtering alerts by time range.
     """
-
     alerts = get_alerts(
         hive_id=hive_id,
         active_only=active_only,
@@ -350,99 +302,6 @@ def hive_alerts(
     )
 
     return {"hive_id": hive_id, "alerts": alerts}
-
-
-@app.post("/api/measurements")
-async def measurements(measurement: MeasurementIn):
-    """
-    Ingest a single measurement, store the processed point,
-    then broadcast live updates to websocket clients.
-    """
-    hive_registry = get_registry()
-
-    point = ingest_measurement(hive_registry, measurement)
-    point_payload = point.model_dump(mode="json")
-
-    await broadcast_hive_updates(int(measurement.hive_id), point_payload)
-
-    return point
-
-
-@app.post("/api/measurements/batch")
-async def measurements_batch(batch: MeasurementBatchIn):
-    """
-    Ingest a batch of measurements.
-
-    After ingestion, only the newest point per hive is broadcast to reduce
-    unnecessary websocket traffic.
-    """
-    hive_registry = get_registry()
-
-    points = ingest_measurements_batch(hive_registry, batch.items)
-
-    latest_by_hive: dict[int, dict] = {}
-    for point in points:
-        latest_by_hive[int(point.hive_id)] = point.model_dump(mode="json")
-
-    for hive_id, payload in latest_by_hive.items():
-        await broadcast_hive_updates(hive_id, payload)
-
-    return {"count": len(points), "points": points}
-
-
-@app.websocket("/api/live")
-async def live(ws: WebSocket, hive_id: int = Query(..., ge=0)):
-    """
-    Websocket endpoint for one hive.
-
-    When a client connects:
-    - validate hive
-    - send a snapshot
-    - keep the connection open for live updates
-    """
-    hive_ids = set(list_hives())
-
-    if hive_id not in hive_ids:
-        await ws.accept()
-        await ws.send_json(
-            {
-                "type": "error",
-                "hive_id": hive_id,
-                "detail": "Hive not found",
-            }
-        )
-        await ws.close()
-        return
-
-    snapshot = build_snapshot_payload(hive_id)
-
-    await ws_mgr.connect(
-        hive_id,
-        ws,
-        initial_payload={
-            "type": "snapshot",
-            "hive_id": hive_id,
-            "point": snapshot["point"],
-            "status": snapshot["status"],
-            "alerts": snapshot["alerts"],
-        },
-    )
-
-    try:
-        while True:
-            message = await ws.receive()
-
-            if message.get("type") == "websocket.disconnect":
-                break
-
-            if message.get("type") == "websocket.receive":
-                await ws.send_json({"type": "heartbeat", "hive_id": hive_id})
-
-    except WebSocketDisconnect:
-        pass
-
-    finally:
-        await ws_mgr.disconnect(hive_id, ws)
 
 
 @app.get("/api/debug/hive_counts")
@@ -467,16 +326,6 @@ def hive_counts():
     finally:
         conn.close()
 
-
-@app.get("/api/debug/ws")
-async def ws_debug():
-    """
-    Debug endpoint for current websocket subscription state.
-    """
-    return {
-        "total_subscribers": await ws_mgr.total_subscribers(),
-        "subscribed_hives": await ws_mgr.subscribed_hives(),
-    }
 
 @app.patch("/api/alerts/{alert_id}/resolve")
 def resolve_alert(alert_id: int):
@@ -511,8 +360,6 @@ def resolve_alert(alert_id: int):
     finally:
         conn.close()
 
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
