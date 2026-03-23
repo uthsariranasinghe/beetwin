@@ -188,10 +188,10 @@ async def shutdown_event() -> None:
     await ws_mgr.stop_heartbeat_loop()
 
 
-@app.get("/")
-def root():
-    """Basic root endpoint to confirm the API is running."""
-    return {"message": "Beehive Digital Twin API running"}
+##@app.get("/")
+##def root():
+   ## """Basic root endpoint to confirm the API is running."""
+   ## return {"message": "Beehive Digital Twin API running"}
 
 
 @app.get("/api/health")
