@@ -512,10 +512,9 @@ def resolve_alert(alert_id: int):
         conn.close()
 
 from fastapi.staticfiles import StaticFiles
-
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
