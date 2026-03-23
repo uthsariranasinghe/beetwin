@@ -44,9 +44,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-    "https://your-frontend.up.railway.app"
-]
+    allow_origins=["*"],  # simplest and safest for now
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
