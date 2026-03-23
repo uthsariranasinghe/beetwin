@@ -1,6 +1,5 @@
 import logo from "../assets/logo.png";
 import { useEffect, useMemo, useState } from "react";
-import { connectHiveLive } from "../api/ws";
 import {
   getAlerts,
   getHives,
@@ -13,7 +12,6 @@ import type {
   HiveOverviewItem,
   HiveStatus,
   TwinPoint,
-  LiveMessage,
 } from "../api/types";
 import AlertsList from "../components/dashboard/AlertsList";
 import KpiCards from "../components/dashboard/KpiCards";
@@ -24,8 +22,7 @@ import TopBar, {
   type TopBarTab,
 } from "../components/layout/TopBar";
 
-type DashboardMode = "replay" | "live";
-type DashboardTab = TopBarTab;
+type DashboardTab = Exclude<TopBarTab, "live">;
 type MetricKey = "temperature" | "humidity" | "audio_density";
 
 type RangeBounds = {
@@ -83,13 +80,43 @@ function getQuickRangeBounds(
 
 function sortAndDedupePoints(points: TwinPoint[]) {
   const map = new Map<string, TwinPoint>();
-  for (const point of points) {
-    map.set(point.ts, point);
-  }
+  for (const point of points) map.set(point.ts, point);
 
   return Array.from(map.values()).sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
+}
+
+function formatValue(value: number | null | undefined, digits = 2) {
+  if (value == null || Number.isNaN(value)) return "—";
+  return Number(value).toFixed(digits);
+}
+
+function formatStatusLabel(status?: string) {
+  switch (status) {
+    case "healthy":
+      return "Healthy";
+    case "warning":
+      return "Warning";
+    case "critical":
+      return "Critical";
+    case "offline":
+      return "Offline";
+    default:
+      return "No Data";
+  }
+}
+
+function getMetricUnit(metric: MetricKey) {
+  if (metric === "temperature") return "°C";
+  if (metric === "humidity") return "%";
+  return "";
+}
+
+function getMetricLabel(metric: MetricKey) {
+  if (metric === "temperature") return "Temperature";
+  if (metric === "humidity") return "Humidity";
+  return "Hive Activity";
 }
 
 function hasRawObservation(point: TwinPoint) {
@@ -115,27 +142,6 @@ function hasAnyDisplayValue(point: TwinPoint) {
   return hasRawObservation(point) || hasPredictedOrFilteredValue(point);
 }
 
-function formatStatusLabel(status?: string) {
-  switch (status) {
-    case "healthy":
-      return "Healthy";
-    case "warning":
-      return "Warning";
-    case "critical":
-      return "Critical";
-    case "offline":
-      return "Offline";
-    default:
-      return "No Data";
-  }
-}
-
-function getMetricLabel(metric: MetricKey) {
-  if (metric === "temperature") return "Temperature";
-  if (metric === "humidity") return "Humidity";
-  return "Hive Activity";
-}
-
 function getLatestObservedPoint(points: TwinPoint[]) {
   for (let i = points.length - 1; i >= 0; i -= 1) {
     const point = points[i];
@@ -152,9 +158,24 @@ function getLatestEstimatedPoint(points: TwinPoint[]) {
   return null;
 }
 
+function getMetricDisplayValue(point: TwinPoint | null, metric: MetricKey) {
+  if (!point) return "—";
+
+  const value =
+    point.filt?.[metric] ??
+    point.pred?.[metric] ??
+    point.raw?.[metric] ??
+    null;
+
+  if (value == null || Number.isNaN(value)) return "—";
+
+  const digits = metric === "audio_density" ? 3 : 2;
+  const unit = getMetricUnit(metric);
+  return `${formatValue(value, digits)} ${unit}`.trim();
+}
+
 function getSimpleStatusSummary(status: HiveStatus | null) {
   if (!status) return "No current condition available.";
-
   switch (status.status) {
     case "healthy":
       return "Hive is stable.";
@@ -187,7 +208,7 @@ function getSimpleActionText(status: HiveStatus | null, alertsCount: number) {
   }
 
   if (status.status === "offline") {
-    return "Check simulator or data flow.";
+    return "Review dataset availability.";
   }
 
   return "Review hive condition.";
@@ -218,7 +239,6 @@ function DashboardSidebar({
 }) {
   const items: { id: DashboardTab; title: string }[] = [
     { id: "overview", title: "Overview" },
-    { id: "live", title: "Live Monitoring" }, 
     { id: "alerts", title: "Alerts" },
     { id: "history", title: "History" },
   ];
@@ -227,6 +247,7 @@ function DashboardSidebar({
     <div className="sidebar">
       <div className="sidebar-brand">
         <img src={logo} alt="BeeTwin Logo" className="sidebar-logo-img" />
+
         <div className="sidebar-text">
           <div className="sidebar-subtitle">Digital Twin Beehive Dashboard</div>
         </div>
@@ -259,7 +280,6 @@ function DashboardSidebar({
 }
 
 export default function Dashboard() {
-  const [mode, setMode] = useState<DashboardMode>("replay");
   const [hives, setHives] = useState<number[]>([]);
   const [overview, setOverview] = useState<HiveOverviewItem[]>([]);
   const [selectedHive, setSelectedHive] = useState<number | null>(null);
@@ -296,14 +316,8 @@ export default function Dashboard() {
     return Number.isNaN(d.getTime()) ? null : d;
   }, [selectedOverview]);
 
-  const appliedFrom = useMemo(
-    () => parseDateInput(appliedFromInput),
-    [appliedFromInput]
-  );
-  const appliedTo = useMemo(
-    () => parseDateInput(appliedToInput),
-    [appliedToInput]
-  );
+  const appliedFrom = useMemo(() => parseDateInput(appliedFromInput), [appliedFromInput]);
+  const appliedTo = useMemo(() => parseDateInput(appliedToInput), [appliedToInput]);
 
   const latestObservedPoint = useMemo(
     () => getLatestObservedPoint(rangeHistory),
@@ -317,7 +331,7 @@ export default function Dashboard() {
 
   const currentStatus = snapshotStatus ?? selectedOverview?.status ?? null;
   const currentStatusText = formatStatusLabel(currentStatus?.status);
-  const connectionLabel = mode === "live" ? "Live Mode" : "Replay Mode";
+  const connectionLabel = "Replay Mode";
 
   const rangeAlerts = useMemo(() => {
     if (!appliedFrom || !appliedTo) return [];
@@ -330,10 +344,7 @@ export default function Dashboard() {
     });
   }, [rangeAlertsAll, appliedFrom, appliedTo]);
 
-  const latestRangeAlert = useMemo(
-    () => getMostRecentAlert(rangeAlerts),
-    [rangeAlerts]
-  );
+  const latestRangeAlert = useMemo(() => getMostRecentAlert(rangeAlerts), [rangeAlerts]);
 
   useEffect(() => {
     async function loadInitial() {
@@ -343,7 +354,7 @@ export default function Dashboard() {
 
         const [hivesRes, overviewRes] = await Promise.all([
           getHives(),
-          getOverview(mode),
+          getOverview(),
         ]);
 
         setHives(hivesRes.hives);
@@ -360,89 +371,7 @@ export default function Dashboard() {
     }
 
     loadInitial();
-  }, [mode]);
-
-useEffect(() => {
-  if (mode !== "live" || selectedHive == null) {
-    return;
-  }
-
-  const ws = connectHiveLive(
-    selectedHive,
-    (msg) => {
-      switch (msg.type) {
-        case "snapshot":
-          setSnapshotPoint(msg.point);
-          setSnapshotStatus(msg.status);
-          setRangeAlertsAll(msg.alerts);
-          setRangeHistory((prev) =>
-            msg.point ? sortAndDedupePoints([...prev, msg.point]) : prev
-          );
-          setOverview((prev) =>
-            prev.map((item) =>
-              item.hive_id === selectedHive
-                ? {
-                    ...item,
-                    latest_point: msg.point,
-                    status: msg.status,
-                  }
-                : item
-            )
-          );
-          break;
-
-        case "point":
-          setSnapshotPoint(msg.point);
-          setRangeHistory((prev) => sortAndDedupePoints([...prev, msg.point]));
-          setOverview((prev) =>
-            prev.map((item) =>
-              item.hive_id === selectedHive
-                ? {
-                    ...item,
-                    latest_point: msg.point,
-                  }
-                : item
-            )
-          );
-          break;
-
-        case "status":
-          setSnapshotStatus(msg.status);
-          setOverview((prev) =>
-            prev.map((item) =>
-              item.hive_id === selectedHive
-                ? {
-                    ...item,
-                    status: msg.status,
-                  }
-                : item
-            )
-          );
-          break;
-
-        case "alerts":
-          setRangeAlertsAll(msg.alerts);
-          break;
-
-        case "heartbeat":
-          break;
-
-        case "error":
-          setError(msg.detail || "Live connection error.");
-          break;
-      }
-    },
-    undefined,
-    undefined,
-    () => {
-      setError("Live connection error.");
-    }
-  );
-
-  return () => {
-    ws.close();
-  };
-}, [mode, selectedHive]);
+  }, []);
 
   useEffect(() => {
     if (quickRange === "custom") return;
@@ -480,9 +409,9 @@ useEffect(() => {
         setError(null);
 
         const [snapshotRes, alertsRes, historyRes] = await Promise.all([
-          getSnapshot(hiveId, mode),
+          getSnapshot(hiveId),
           getAlerts(hiveId, activeOnlyAlerts, 500, fromIso, toIso),
-          getRangeHistory(hiveId, fromIso, toIso, 5000, mode),
+          getRangeHistory(hiveId, fromIso, toIso, 5000),
         ]);
 
         if (cancelled) return;
@@ -517,11 +446,11 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [selectedHive, activeOnlyAlerts, appliedFrom, appliedTo, mode]);
+  }, [selectedHive, activeOnlyAlerts, appliedFrom, appliedTo]);
 
   async function refreshOverview() {
     try {
-      const res = await getOverview(mode);
+      const res = await getOverview();
       setOverview(res.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to refresh overview");
@@ -559,23 +488,13 @@ useEffect(() => {
               <div className="section-header section-header-space">
                 <div>
                   <h3>Hive Overview</h3>
-                  <div className="muted">
-                    {mode === "live"
-                      ? "Live simulator condition and trend"
-                      : "Historical replay condition and trend"}
-                  </div>
+                  <div className="muted">Historical replay condition and trend</div>
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button onClick={() => setFocusMetric("temperature")}>
-                    Temperature
-                  </button>
-                  <button onClick={() => setFocusMetric("humidity")}>
-                    Humidity
-                  </button>
-                  <button onClick={() => setFocusMetric("audio_density")}>
-                    Activity
-                  </button>
+                  <button onClick={() => setFocusMetric("temperature")}>Temperature</button>
+                  <button onClick={() => setFocusMetric("humidity")}>Humidity</button>
+                  <button onClick={() => setFocusMetric("audio_density")}>Activity</button>
                 </div>
               </div>
 
@@ -629,46 +548,7 @@ useEffect(() => {
       </>
     );
   }
-  function renderLiveTab() {
-  return (
-    <div className="dashboard-grid single-view">
-      <div className="card">
-        <div className="section-header">
-          <h3>Live Monitoring</h3>
-          <div className="muted">
-            {mode === "live"
-              ? "Real-time streaming data "
-              : "Replay of historical Kalman filter outputs"}
-          </div>
-        </div>
 
-        <div className="chart-stack">
-          <TwinChart
-            title="Temperature"
-            metric="temperature"
-            points={rangeHistory}
-            mode="technical"
-            quickRange={quickRange}
-          />
-          <TwinChart
-            title="Humidity"
-            metric="humidity"
-            points={rangeHistory}
-            mode="technical"
-            quickRange={quickRange}
-          />
-          <TwinChart
-            title="Hive Activity"
-            metric="audio_density"
-            points={rangeHistory}
-            mode="technical"
-            quickRange={quickRange}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
   function renderAlertsTab() {
     return (
       <div className="dashboard-grid">
@@ -774,28 +654,19 @@ useEffect(() => {
             <div>
               <strong>Observed Points</strong>
               <div>
-                {
-                  rangeHistory.filter(
-                    (p) => p.has_observation && hasRawObservation(p)
-                  ).length
-                }
+                {rangeHistory.filter((p) => p.has_observation && hasRawObservation(p)).length}
               </div>
             </div>
             <div>
               <strong>Estimated State</strong>
               <div>
-                {
-                  rangeHistory.filter((p) => hasPredictedOrFilteredValue(p))
-                    .length
-                }
+                {rangeHistory.filter((p) => hasPredictedOrFilteredValue(p)).length}
               </div>
             </div>
             <div>
               <strong>Latest Raw Time</strong>
               <div>
-                {latestObservedPoint
-                  ? new Date(latestObservedPoint.ts).toLocaleString()
-                  : "—"}
+                {latestObservedPoint ? new Date(latestObservedPoint.ts).toLocaleString() : "—"}
               </div>
             </div>
           </div>
@@ -829,19 +700,17 @@ useEffect(() => {
   }
 
   function renderActiveTab() {
-  switch (activeTab) {
-    case "overview":
-      return renderOverviewTab();
-    case "live":
-      return renderLiveTab();
-    case "alerts":
-      return renderAlertsTab();
-    case "history":
-      return renderHistoryTab();
-    default:
-      return renderOverviewTab();
+    switch (activeTab) {
+      case "overview":
+        return renderOverviewTab();
+      case "alerts":
+        return renderAlertsTab();
+      case "history":
+        return renderHistoryTab();
+      default:
+        return renderOverviewTab();
+    }
   }
-}
 
   return (
     <AppShell
@@ -854,9 +723,7 @@ useEffect(() => {
           connectionLabel={connectionLabel}
           quickRange={quickRange}
           onChangeQuickRange={setQuickRange}
-          activeTab={activeTab}
-          mode={mode}
-          onChangeMode={setMode}
+          activeTab={activeTab as TopBarTab}
         />
       }
     >
