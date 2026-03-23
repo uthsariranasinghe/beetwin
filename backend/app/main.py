@@ -515,7 +515,7 @@ def resolve_alert(alert_id: int):
 
 from pathlib import Path
 
-##BASE_DIR = Path(__file__).resolve().parent.parent
-##FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
-##app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")##
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
