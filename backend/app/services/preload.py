@@ -136,35 +136,6 @@ def register_hives_from_df(df: pd.DataFrame) -> list[int]:
     return hive_ids
 
 
-def shift_history_to_recent_timeline(
-    df: pd.DataFrame,
-    end_buffer_minutes: int = 30,
-) -> pd.DataFrame:
-    """
-    Shift historical timestamps closer to the current time.
-
-    The newest historical point is moved to:
-    current UTC time minus end_buffer_minutes
-
-    This keeps the original spacing between observations while making
-    the dashboard appear recently active.
-    """
-    if df.empty:
-        return df
-
-    df = df.copy()
-
-    latest_ts = df["published_at"].max()
-    target_latest_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(
-        minutes=end_buffer_minutes
-    )
-
-    shift_delta = target_latest_ts - latest_ts
-    df["published_at"] = df["published_at"] + shift_delta
-
-    return df
-
-
 def build_measurement(row) -> MeasurementIn:
     """
     Convert one dataframe row into the MeasurementIn schema used by ingestion.
@@ -192,7 +163,7 @@ def preload_history_if_needed(
 
     Main behavior:
     - preload runs only if matching hive data is not already present
-    - historical timestamps are shifted near the current time
+    - original historical timestamps are preserved
     - data is replayed through the normal ingestion pipeline
     - optional filtering can restrict preload to selected hive IDs
 
@@ -202,6 +173,8 @@ def preload_history_if_needed(
     - if include_missing_rows is True, missing rows are kept only for hives that
       have at least one real observation somewhere in their timeline
     """
+    _ = end_buffer_minutes  # kept only so existing config calls do not break
+
     if db_has_measurements_for_hives(hive_ids):
         print("[preload] Measurements already exist for selected hives. Skipping preload.")
         return
@@ -237,27 +210,18 @@ def preload_history_if_needed(
         print("[preload] All candidate hives contained only missing rows. Skipping preload.")
         return
 
-    original_hives_after_validation = sorted(df["tag_number"].dropna().astype(int).unique().tolist())
-    print(f"[preload] Hives with at least one valid observation: {original_hives_after_validation}")
-
-    df = shift_history_to_recent_timeline(
-        df=df,
-        end_buffer_minutes=end_buffer_minutes,
+    original_hives_after_validation = sorted(
+        df["tag_number"].dropna().astype(int).unique().tolist()
     )
-
-    shifted_start = df["published_at"].min()
-    shifted_end = df["published_at"].max()
+    print(f"[preload] Hives with at least one valid observation: {original_hives_after_validation}")
 
     registered_hive_ids = register_hives_from_df(df)
 
     print(f"[preload] Registered hives: {registered_hive_ids}")
-    print(f"[preload] Original range: {original_start} -> {original_end}")
-    print(f"[preload] Shifted range:  {shifted_start} -> {shifted_end}")
+    print(f"[preload] Final range: {original_start} -> {original_end}")
 
     total_rows_after_filtering = len(df)
-    total_missing_rows = int(
-        (~df.apply(row_has_any_observation_series, axis=1)).sum()
-    )
+    total_missing_rows = int((~df.apply(row_has_any_observation_series, axis=1)).sum())
     total_non_missing_rows = int(total_rows_after_filtering - total_missing_rows)
 
     print(f"[preload] Rows after hive validation: {total_rows_after_filtering}")
