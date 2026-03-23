@@ -367,12 +367,6 @@ def derive_status_from_latest(
     warning = bool(alerts.get("anomaly_p95")) or bool(alerts.get("chi2_p95"))
     missing_observation = not has_observation
 
-    if age_min > float(stale_after_minutes):
-        return {
-            "status": "offline",
-            "status_reason": f"No recent accepted data for {age_min:.1f} minutes",
-            "last_ts": latest_point.get("ts"),
-        }
 
     if critical:
         return {
